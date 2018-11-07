@@ -45,7 +45,7 @@ def field_channel(fn):
 
 images_by_field = tz.groupby(field_channel, input_images)
 illum_fields = {k: pre.find_background_illumination(fns, radius=41)
-                for k, fns in tqdm(images_by_field.items())
+                for k, fns in tqdm(images_by_field.items(), 'illum')
                 if k != ('none', 'none')}
 
 for k, im in illum_fields.items():
@@ -56,7 +56,7 @@ t1 = time.time()
 print(f'illumination estimated in {ftime(t1 - t0)}')
 
 ############### illumination correction #####################
-for k, fns in tqdm(images_by_field.items()):
+for k, fns in tqdm(images_by_field.items(), 'corr'):
     corrected = pre.correct_multiimage_illumination(fns, illum_fields[k],
                                                     stretch_quantile=0.01)
     for fn, image in zip(fns, corrected):
@@ -90,7 +90,7 @@ by_coord = tz.groupby(intermediate_images, plate_well)
 
 order = generate_spiral((5, 5), 'right', clockwise=False) 
 
-for i, (coord, fns) in enumerate(tqdm(by_coord.items())):
+for i, (coord, fns) in enumerate(tqdm(by_coord.items(), 'montage')):
     by_ch = tz.groupby(ch, fns)
     montaged = {}
     for ch, fns_ch in sorted(by_ch.items()):
@@ -107,5 +107,3 @@ t3 = time.time()
 print(f'montaged in {ftime(t3 - t2)}')
 
 
-if __name__ == '__main__':
-    main()
