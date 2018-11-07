@@ -1,60 +1,110 @@
 import os
+import glob
 import sys
 import re
+import time
 import click
 import toolz as tz
+from tqdm import tqdm
 from skimage import io
 from microscopium import preprocess as pre
 from microscopium._util import generate_spiral
 
 ROOT = '/scratch/su62/petermac/data'
+os.chdir(ROOT)
 OUT = os.path.join(ROOT, 'out')
-
 os.makedirs(OUT)
 
 
-def get_surrounding_dirs(indir, root=None, radius=3):
-    root = root or ROOT
-    dirs = list(filter(os.path.isdir, os.listdir(root)))
-    idx = dirs.index(indir)
-    low = min(0, idx - radius)
-    high = max(idx + radius, len(dirs) - 1)
-    return dirs[low:high]
+def ftime(seconds):
+    string = ''
+    units = ['d', 'h', 'm', 's']
+    values = [3600 * 24, 3600, 60, 1]
+    for unit, value in zip(units, values):
+        amount = seconds // value
+        if amount > 0:
+            string += f'{amount}{unit}'
+        seconds = seconds % value
+    return string
 
 
-def get_full_paths(dirs, ext):
-    fns = []
-    for d in sorted(dirs):
-        for fn in sorted(os.listdir(d)):
-            if fn.endswith(ext):
-                fns.append(os.path.join(d, fn))
-    return fns
+############### illumination fields #####################
+t0 = time.time()
+
+input_images = sorted(glob.glob('*/*.TIF'))
+
+exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
+       r'(?P<well>[A-P]\d\d)f(?P<field>\d\d)d(?P<channel>\d).TIF')
+
+def field_channel(fn):
+    match = re.match(exp, fn)
+    if match is not None:
+        return (match['field'], match['channel'])
+    else:
+        return 'none', 'none'
+
+images_by_field = tz.groupby(field_channel, input_images)
+illum_fields = {k: pre.find_background_illumination(fns, radius=41)
+                for k, fns in tqdm(images_by_field.items())
+                if k != ('none', 'none')}
+
+for k, im in illum_fields.items():
+    fn = 'illum-' + str.join('-', k) + '.png'
+    io.imsave(im, os.path.join(OUT, fn))
+
+t1 = time.time()
+print(f'illumination estimated in {ftime(t1 - t0)}')
+
+############### illumination correction #####################
+for k, fns in tqdm(images_by_field.items()):
+    corrected = pre.correct_multiimage_illumination(fns, illum_fields[k],
+                                                    stretch_quantile=0.01)
+    for fn, image in zip(fns, corrected):
+        fnout = fn[:-4] + '.illum.png'
+        io.imsave(image, fnout)
+
+t2 = time.time()
+print(f'illumination corrected in {ftime(t2 - t1)}')
+
+############### montaging #####################
+
+intermediate_images = sorted(glob.glob('*/*.illum.png'))
+exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
+       r'(?P<well>[A-P]\d\d)f(?P<field>\d\d)d(?P<channel>\d).illum.png')
+
+def plate_well(fn):
+    match = re.match(exp, fn)
+    if match in not None:
+        return match['plate'], match['well']
+    else:
+        return 'none', 'none'
+
+def ch(fn):
+    match = re.match(exp, fn)
+    if match is not None:
+        return int(match['channel'])
+    else:
+        return 'none'
+
+by_coord = tz.groupby(intermediate_images, plate_well)
+
+order = generate_spiral((5, 5), 'right', clockwise=False) 
+
+for i, (coord, fns) in enumerate(tqdm(by_coord.items())):
+    by_ch = tz.groupby(ch, fns)
+    montaged = {}
+    for ch, fns_ch in sorted(by_ch.items()):
+        montaged[ch] = pre.montage_with_missing(fns_ch, order=order,
+                                                re_string=exp,
+                                                re_group='field')[0]
+    stacked = pre.stack_channels(montaged.values(), order=[None, 1, 0])
+    plate, well = coord
+    fn_out = os.path.join(OUT, plate, '-'.join(coord)) + '.jpg'
+    io.imsave(fn_out, stacked, quality=95)
 
 
-@click.command()
-@click.argument('indir', help='input directory')
-@click.option('--outdir', help='output directory')
-def main(indir, outdir=None):
-    indir = indir.rstrip('/')  # ensure no trailing slash
-    stub = os.path.split(indir)[1]  # we'll use this for output
-    outdir = outdir or os.path.join(OUT, stub)
-    exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
-           r'(?P<well>[A-P]\d\d)f(?P<field>\d\d)d(?P<channel>\d).TIF')
-    files = [os.path.join(indir, fn) for fn in sorted(os.listdir(indir))]
-    illum_files = get_surrounding_dirs(indir)
-    def well_channel(fn):
-        match = re.match(exp, fn)
-        if match is not None:
-            return (match['well'], match['channel'])
-        else:
-            return None
-    illum_groups = tz.groupby(well_channel, illum_files)
-    for (well, ch), files in illum_groups.items():
-        illum = pre.find_background_illumination(illum_files, quantile=0.05,
-                                                 stretch_quantile=0.001)
-        io.imsave(str.join('_', ['illum', well, ch]) + '.tif', illum)
-        pre.correct_multiimage_illumination(
-    montage_order = generate_spiral((5, 5), 'right', clockwise=False)
+t3 = time.time()
+print(f'montaged in {ftime(t3 - t2)}')
 
 
 if __name__ == '__main__':
