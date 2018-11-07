@@ -74,7 +74,7 @@ exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
 
 def plate_well(fn):
     match = re.match(exp, fn)
-    if match in not None:
+    if match is not None:
         return match['plate'], match['well']
     else:
         return 'none', 'none'
