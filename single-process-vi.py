@@ -5,6 +5,9 @@ import re
 import time
 import click
 import toolz as tz
+from dask_jobqueue import SLURMCluster as Cluster
+from dask import delayed
+from dask.distributed import Client
 from tqdm import tqdm
 from skimage import io
 from microscopium import preprocess as pre
@@ -27,6 +30,9 @@ def ftime(seconds):
         seconds = seconds % value
     return string
 
+# config in /home/jnun0003/.config/dask/jobqueue.yaml
+cluster = Cluster(walltime='00:06:00')
+cluster.adapt(minimum=2, maximum=16, target_duration='1d')
 
 ############### illumination fields #####################
 t0 = time.time()
@@ -43,12 +49,17 @@ def field_channel(fn):
     else:
         return 'none', 'none'
 
+# set up dask Futures to be computed on cluster (client)
 images_by_field = tz.groupby(field_channel, input_images)
-illum_fields = {k: pre.find_background_illumination(fns, radius=41)
-                for k, fns in tqdm(images_by_field.items(), 'illum')
-                if k != ('none', 'none')}
+client = Client(cluster)
+illum_fields = {k: client.submit(pre.find_background_illumination,
+                                 fns, radius=41)
+                for k, fns in images_by_field.items() if k != ('none', 'none')}
 
-for k, im in illum_fields.items():
+# now gather the results
+for k in tqdm(illum_fields, 'illum'):
+    illum_fields[k] = illum_fields[k].result()
+    im = illum_fields[k]
     fn = 'illum-' + str.join('-', k) + '.png'
     io.imsave(im, os.path.join(OUT, fn))
 
@@ -56,17 +67,30 @@ t1 = time.time()
 print(f'illumination estimated in {ftime(t1 - t0)}')
 
 ############### illumination correction #####################
-for k, fns in tqdm(images_by_field.items(), 'corr'):
-    corrected = pre.correct_multiimage_illumination(fns, illum_fields[k],
+# set up dask Futures to be computed on cluster (client)
+def correct_illumination(fns, illum_field):
+    corrected = pre.correct_multiimage_illumination(fns, illum_field,
                                                     stretch_quantile=0.01)
     for fn, image in zip(fns, corrected):
         fnout = fn[:-4] + '.illum.png'
         io.imsave(image, fnout)
+    return 'done'
+
+for k, fns in images_by_field.items():
+    client.submit(correct_illumination, fns, illum_fields[k])
+
+for k, fns in tqdm(images_by_field.items(), 'illum-corr'):
+    client.result()
 
 t2 = time.time()
 print(f'illumination corrected in {ftime(t2 - t1)}')
 
 ############### montaging #####################
+
+# these are much shorter tasks, so we start a new cluster:
+cluster = Cluster(walltime='00:15:00')
+cluster.adapt(minimum=2, maximum=16, target_duration='12h')
+
 
 intermediate_images = sorted(glob.glob('*/*.illum.png'))
 exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
@@ -90,7 +114,7 @@ by_coord = tz.groupby(intermediate_images, plate_well)
 
 order = generate_spiral((5, 5), 'right', clockwise=False) 
 
-for i, (coord, fns) in enumerate(tqdm(by_coord.items(), 'montage')):
+def montage(coord, fns):
     by_ch = tz.groupby(ch, fns)
     montaged = {}
     for ch, fns_ch in sorted(by_ch.items()):
@@ -103,7 +127,13 @@ for i, (coord, fns) in enumerate(tqdm(by_coord.items(), 'montage')):
     io.imsave(fn_out, stacked, quality=95)
 
 
+client = Client(cluster)
+results = [client.submit(montage, coord, fns)
+           for coord, fns in by_coord.items()]
+
+for r in tqdm(results, 'montage'):
+    r.result()
+
 t3 = time.time()
 print(f'montaged in {ftime(t3 - t2)}')
-
 
