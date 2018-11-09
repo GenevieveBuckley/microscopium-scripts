@@ -1,4 +1,5 @@
 import os
+import itertools
 import glob
 import sys
 import re
@@ -16,7 +17,7 @@ from microscopium._util import generate_spiral
 ROOT = '/scratch/su62/petermac/data'
 os.chdir(ROOT)
 OUT = os.path.join(ROOT, 'out')
-os.makedirs(OUT)
+os.makedirs(OUT, exist_ok=True)
 
 
 def ftime(seconds):
