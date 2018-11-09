@@ -32,7 +32,7 @@ def ftime(seconds):
     return string
 
 # config in /home/jnun0003/.config/dask/jobqueue.yaml
-cluster = Cluster(walltime='00:06:00')
+cluster = Cluster(walltime='06:00:00')
 cluster.adapt(minimum=2, maximum=16, target_duration='1d')
 
 ############### illumination fields #####################
