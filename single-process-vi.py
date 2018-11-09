@@ -59,7 +59,7 @@ for k in tqdm(illum_fields, 'illum'):
     illum_fields[k] = illum_fields[k].result()
     im = illum_fields[k]
     fn = 'illum-' + str.join('-', k) + '.png'
-    io.imsave(im, os.path.join(OUT, fn))
+    io.imsave(os.path.join(OUT, fn), im)
 
 t1 = time.time()
 print(f'illumination estimated in {ftime(t1 - t0)}')
@@ -74,7 +74,7 @@ def correct_illumination(key, illum_field):
                                                     stretch_quantile=0.01)
     for fn, image in zip(fns, corrected):
         fnout = fn[:-4] + '.illum.png'
-        io.imsave(image, fnout)
+        io.imsave(fnout, image)
     return 'done'
 
 for k in keys:
