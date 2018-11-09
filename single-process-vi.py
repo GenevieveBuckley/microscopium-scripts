@@ -37,24 +37,21 @@ cluster.adapt(minimum=2, maximum=16, target_duration='1d')
 ############### illumination fields #####################
 t0 = time.time()
 
-input_images = sorted(glob.glob('*/*.TIF'))
-
 exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
        r'(?P<well>[A-P]\d\d)f(?P<field>\d\d)d(?P<channel>\d).TIF')
 
-def field_channel(fn):
-    match = re.match(exp, fn)
-    if match is not None:
-        return (match['field'], match['channel'])
-    else:
-        return 'none', 'none'
+def find_background(key):
+    print(f'finding background for {key}')
+    field, ch = key
+    fns = glob.glob(f'*/*f{field}d{ch}.TIF')
+    illum = pre.find_background_illumination(fns, radius=41)
+    return illum
 
 # set up dask Futures to be computed on cluster (client)
-images_by_field = tz.groupby(field_channel, input_images)
+keys = list(itertools.product((f'{f:02}' for f in range(25)),
+                              ['0', '1']))
 client = Client(cluster)
-illum_fields = {k: client.submit(pre.find_background_illumination,
-                                 fns, radius=41)
-                for k, fns in images_by_field.items() if k != ('none', 'none')}
+illum_fields = {k: client.submit(find_background, k) for k in keys}
 
 # now gather the results
 for k in tqdm(illum_fields, 'illum'):
@@ -68,7 +65,10 @@ print(f'illumination estimated in {ftime(t1 - t0)}')
 
 ############### illumination correction #####################
 # set up dask Futures to be computed on cluster (client)
-def correct_illumination(fns, illum_field):
+def correct_illumination(key, illum_field):
+    print(f'fixing background for {key}')
+    field, ch = key
+    fns = glob.glob(f'*/*f{field}d{ch}.TIF')
     corrected = pre.correct_multiimage_illumination(fns, illum_field,
                                                     stretch_quantile=0.01)
     for fn, image in zip(fns, corrected):
@@ -76,10 +76,10 @@ def correct_illumination(fns, illum_field):
         io.imsave(image, fnout)
     return 'done'
 
-for k, fns in images_by_field.items():
-    client.submit(correct_illumination, fns, illum_fields[k])
+for k in keys:
+    client.submit(correct_illumination, k, illum_fields[k])
 
-for k, fns in tqdm(images_by_field.items(), 'illum-corr'):
+for k in tqdm(keys, 'illum-corr'):
     client.result()
 
 t2 = time.time()
