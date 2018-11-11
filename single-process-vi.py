@@ -14,6 +14,7 @@ from skimage import io
 from microscopium import preprocess as pre
 from microscopium._util import generate_spiral
 
+
 ROOT = '/scratch/su62/petermac/data'
 os.chdir(ROOT)
 OUT = os.path.join(ROOT, 'out')
@@ -77,11 +78,11 @@ def correct_illumination(key, illum_field):
         io.imsave(fnout, image)
     return 'done'
 
-for k in keys:
-    client.submit(correct_illumination, k, illum_fields[k])
+futures = {k: client.submit(correct_illumination, k, illum_fields[k])
+           for k in keys}
 
 for k in tqdm(keys, 'illum-corr'):
-    client.result()
+    client.gather(futures[k])
 
 t2 = time.time()
 print(f'illumination corrected in {ftime(t2 - t1)}')
@@ -89,8 +90,9 @@ print(f'illumination corrected in {ftime(t2 - t1)}')
 ############### montaging #####################
 
 # these are much shorter tasks, so we start a new cluster:
-cluster = Cluster(walltime='00:15:00')
-cluster.adapt(minimum=2, maximum=16, target_duration='12h')
+cluster.close()
+cluster = Cluster(walltime='01:00:00', cores=1, memory='4gb', job_cpu=1, job_mem='36gb')
+cluster.adapt(minimum=2, maximum=48, target_duration='4h')
 
 
 intermediate_images = sorted(glob.glob('*/*.illum.png'))
@@ -111,21 +113,28 @@ def ch(fn):
     else:
         return 'none'
 
-by_coord = tz.groupby(intermediate_images, plate_well)
+by_coord = tz.groupby(plate_well, intermediate_images)
 
 order = generate_spiral((5, 5), 'right', clockwise=False) 
 
 def montage(coord, fns):
+    plate, well = coord
+    fn_out = os.path.join(OUT, plate, '-'.join(coord)) + '.jpg'
+    if os.path.exists(fn_out):
+        return
     by_ch = tz.groupby(ch, fns)
     montaged = {}
-    for ch, fns_ch in sorted(by_ch.items()):
-        montaged[ch] = pre.montage_with_missing(fns_ch, order=order,
+    for c, fns_ch in sorted(by_ch.items()):
+        montaged[c] = pre.montage_with_missing(fns_ch, order=order,
                                                 re_string=exp,
                                                 re_group='field')[0]
     stacked = pre.stack_channels(montaged.values(), order=[None, 1, 0])
-    plate, well = coord
-    fn_out = os.path.join(OUT, plate, '-'.join(coord)) + '.jpg'
     io.imsave(fn_out, stacked, quality=95)
+
+
+plates = set(coord[0] for coord in by_coord)
+for plate in plates:
+    os.makedirs(os.path.join(OUT, plate), exist_ok=True)
 
 
 client = Client(cluster)
