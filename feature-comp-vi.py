@@ -6,16 +6,17 @@ import re
 import time
 import click
 import toolz as tz
+import numpy as np
 from dask_jobqueue import SLURMCluster as Cluster
 from dask import delayed
 from dask.distributed import Client
 from tqdm import tqdm
 from skimage import io
 import pandas as pd
-from microscopium import feature as feat
+from microscopium import features as feat
 
 
-ROOT = '/scratch/su62/petermac/data/out'
+ROOT = '/scratch/su62/petermac/data'
 OUT = os.path.join(ROOT, 'out')
 os.chdir(OUT)
 
@@ -49,9 +50,9 @@ cols = [f'{i:02}' for i in range(1, 25)]
 wells = [''.join([row, col]) for row in rows for col in cols]
 
 all_plate_wells = list(itertools.product(plates, wells))
-all_filenames = [os.path.join(plate, '_'.join([plate, well]) + '.jpg')
+all_filenames = [os.path.join(plate, '-'.join([plate, well]) + '.jpg')
                  for plate, well in all_plate_wells]
-plate_wells, filenames = zip(*[plate_well, filename
+plate_wells, filenames = zip(*[(plate_well, filename)
                                for plate_well, filename
                                in zip(all_plate_wells, all_filenames)
                                if os.path.exists(filename)])
