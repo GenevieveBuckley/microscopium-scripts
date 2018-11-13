@@ -9,7 +9,7 @@ import toolz as tz
 import numpy as np
 from dask_jobqueue import SLURMCluster as Cluster
 from dask import delayed
-from dask.distributed import Client
+from dask.distributed import Client, as_completed
 from tqdm import tqdm
 from skimage import io
 import pandas as pd
@@ -66,18 +66,20 @@ def features_with_names(fn):
     return fvector, names
 
 
-def features(fn):
-    return features_with_names(fn)[0]
+def features(num_fn):
+    num, fn = num_fn
+    return num, features_with_names(fn)[0]
 
 
 feature_names = features_with_names(filenames[0])[1]
 
 client = Client(cluster)
 
-feature_futures = client.map(features, filenames)
 X = np.empty((len(filenames), len(feature_names)), dtype=np.float32)
-for i, future in tqdm(enumerate(feature_futures), 'features'):
-    X[i, :] = future.result()
+for future in tqdm(as_completed(client.map(features, enumerate(filenames))),
+                   desc='features', total=len(X)):
+    i, v = future.result()
+    X[i, :] = v
 
 t4 = time.time()
 print(f'features computed in {ftime(t4 - t3)}')
