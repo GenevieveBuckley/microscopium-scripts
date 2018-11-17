@@ -11,6 +11,7 @@ import pandas as pd
 from dask_jobqueue import SLURMCluster as Cluster
 from dask import delayed
 from dask.distributed import Client, as_completed
+from distributed.scheduler import KilledWorker
 from tqdm import tqdm
 from skimage import io
 from microscopium import preprocess as pre
@@ -197,10 +198,18 @@ feature_names = features_with_names(filenames[0])[1]
 client = Client(cluster)
 
 X = np.empty((len(filenames), len(feature_names)), dtype=np.float32)
-for future in tqdm(as_completed(client.map(features, enumerate(filenames))),
-                   desc='features', total=len(X)):
-    i, v = future.result()
-    X[i, :] = v
+with tqdm(total=len(X), desc='features') as progress:
+    queue = as_completed(client.map(features, enumerate(filenames)))
+    for future in queue:
+        try:
+            i, v = future.result()
+        except KilledWorker:
+            client.retry([future])
+            queue.add(future)
+        else:
+            X[i, :] = v
+            future.cancel()
+            progress.update(1)
 
 t4 = time.time()
 print(f'features computed in {ftime(t4 - t3)}')
