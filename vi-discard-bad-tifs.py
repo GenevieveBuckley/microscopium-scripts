@@ -1,3 +1,4 @@
+"""Three TIFs not readable by Python, so rename to avoid dealing with them."""
 import os
 import sys
 import glob

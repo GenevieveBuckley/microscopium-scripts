@@ -1,8 +1,9 @@
+"""Process the plate barcode to plate kind mapping from a txt from a docx."""
 import re
 import sys
 import pandas as pd
 
-pattern = (r'(?P<bullshit>\(.*\) )(?P<kind>D\d{9})'
+pattern = (r'(?P<useless>\(.*\) )(?P<kind>D\d{9})'
            r' = (?P<barcode>\d*-KTC-\w{3,4}).*')
 
 if __name__ == '__main__':

@@ -1,3 +1,4 @@
+"""Use dask-jobqueue to correct illumination, montage, and extract features."""
 import os
 import itertools
 import glob
