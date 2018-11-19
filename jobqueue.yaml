@@ -20,4 +20,4 @@ jobqueue:
     job-cpu: 8
     job-mem: 36gb
     #job-extra: {}
-    log-directory: /home/jnun0003/dask-logs
+    log-directory: $HOME/dask-logs

@@ -20,11 +20,15 @@ from microscopium._util import generate_spiral
 from microscopium import features as feat
 
 
+# Set up input and output dirs here.
 ROOT = '/scratch/su62/petermac/data'
 os.chdir(ROOT)
 OUT = os.path.join(ROOT, 'out')
 os.makedirs(OUT, exist_ok=True)
 
+# regular expression to match illumination-corrected png filenames
+exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
+       r'(?P<well>[A-P]\d\d)f(?P<field>\d\d)d(?P<channel>\d).illum.png')
 
 def ftime(seconds):
     string = ''
@@ -44,8 +48,6 @@ cluster.adapt(minimum=2, maximum=16, target_duration='1d')
 ############### illumination fields #####################
 t0 = time.time()
 
-exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
-       r'(?P<well>[A-P]\d\d)f(?P<field>\d\d)d(?P<channel>\d).TIF')
 
 def find_background(key):
     print(f'finding background for {key}')
@@ -75,6 +77,8 @@ print(f'illumination estimated in {ftime(t1 - t0)}')
 ############### illumination correction #####################
 # set up dask Futures to be computed on cluster (client)
 def correct_illumination(tup):
+    # Key is a (plate, channel) tuple. We unpack in two stages for easier
+    # printing and return value
     key, illum_field = tup
     print(f'fixing background for {key}')
     plate, ch = key
@@ -105,8 +109,6 @@ cluster.adapt(minimum=0, maximum=48, target_duration='4h')
 
 
 intermediate_images = sorted(glob.glob('*/*.illum.png'))
-exp = (r'(?P<dir>.*)/(?P<plate>mfgtmp_\d*)_'
-       r'(?P<well>[A-P]\d\d)f(?P<field>\d\d)d(?P<channel>\d).illum.png')
 
 def plate_well(fn):
     match = re.match(exp, fn)
@@ -158,9 +160,6 @@ t3 = time.time()
 print(f'montaged in {ftime(t3 - t2)}')
 
 
-
-
-
 ############### feature computation #####################
 
 os.chdir(OUT)
@@ -189,6 +188,11 @@ def features_with_names(fn):
     return fvector, names
 
 
+# We want to do client.map(function, collection) in a way that preserves the
+# ordering of the filenames, because we'll be using `distributed.as_completed`,
+# so the results will come back out of order. This wrapper around
+# features_with_names simplifies the logic of keeping track of indices (while
+# ignoring names which we only need once).
 def features(num_fn):
     num, fn = num_fn
     return num, features_with_names(fn)[0]
